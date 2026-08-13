@@ -282,7 +282,6 @@ attr FindMy_person1_iPhone readingList fm_person1_b5b2d80bb3:findmy/person1/ABCD
 attr FindMy_person1_iPhone setList locate:noArg { my $id=ReadingsVal($NAME,"deviceId",""); return undef if $id eq ""; return "findmy/person1/$id/locate 1"; }
 attr FindMy_person1_iPhone webCmd locate
 attr FindMy_person1_iPhone stateFormat { my $n=ReadingsVal($name,"name","findmy2mqtt"); my $s=ReadingsVal($name,"state","unknown"); my $b=ReadingsVal($name,"battery","-"); my $t=ReadingsVal($name,"locationTime","-"); return "$n: $s | Akku: $b % | Standort: $t"; }
-attr FindMy_person1_iPhone webCmd locate
 ```
 
 Mögliche Readings:
