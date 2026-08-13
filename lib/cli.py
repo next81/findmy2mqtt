@@ -5,7 +5,7 @@
 
 """Kommandozeilenschnittstelle von findmy2mqtt.
 
-Alle Befehle verwenden standardmäßig /etc/findmy2mqtt/config.json. Der Wrapper
+Alle Befehle verwenden standardmäßig /etc/findmy2mqtt/config.yaml. Der Wrapper
 /usr/local/bin/findmy2mqtt sorgt dafür, dass Benutzer den venv-Pfad nicht kennen müssen.
 """
 
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     devices.add_argument("account", help="account name from config")
 
     password = sub.add_parser(
-        "set-password",
+        "password",
         help="store an Apple password in the configured password file",
     )
     password.add_argument("account", help="account name from config")
@@ -85,25 +85,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="exact Apple device name or Apple device ID",
     )
 
+    message = sub.add_parser(
+        "message",
+        help="display a message on an Apple Find My device",
+    )
+    message.add_argument("account", help="account name from config")
+    message.add_argument(
+        "device",
+        help="exact Apple device name or Apple device ID",
+    )
+    message.add_argument(
+        "subject",
+        help="message subject, e.g. alert",
+    )
+    message.add_argument("message", help="message text")
+    message.add_argument("--sound", action="store_true", help="play a sound")
+    message.add_argument("--vibrate", action="store_true", help="vibrate")
+    message.add_argument("--strobe", action="store_true", help="request strobe")
+
     return parser
 
 
 def set_password(config: Config, account: AccountConfig) -> None:
-    # Das Passwort wird zweimal verdeckt abgefragt und anschließend nur in der
-    # konfigurierten Secret-Datei abgelegt; es erscheint weder in MQTT noch Readings.
+    # Das Passwort wird einmal verdeckt abgefragt und nur in der konfigurierten
+    # Secret-Datei abgelegt; bei Bedarf kann es jederzeit neu gesetzt werden.
     path = account_password_path(config, account)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    first = getpass.getpass(f"Apple password for {account.appleId}: ")
-    second = getpass.getpass("Repeat password: ")
+    password = getpass.getpass(f"Apple password for {account.appleId}: ")
 
-    if not first:
+    if not password:
         raise RuntimeError("empty password")
 
-    if first != second:
-        raise RuntimeError("passwords do not match")
-
-    path.write_text(first, encoding="utf-8")
+    path.write_text(password, encoding="utf-8")
     os.chmod(path, 0o600)
     print(f"Password stored in {path}")
 
@@ -166,6 +180,29 @@ def locate_device(
     print(f"Locate request sent to {deviceName} [{deviceId}]")
 
 
+def send_message(
+    config: Config,
+    account: AccountConfig,
+    selector: str,
+    message: str,
+    *,
+    subject: str,
+    sound: bool,
+    vibrate: bool,
+    strobe: bool,
+) -> None:
+    appleAccount = AppleAccount(config, account)
+    deviceId, deviceName = appleAccount.display_message(
+        selector,
+        message,
+        subject=subject,
+        sound=sound,
+        vibrate=vibrate,
+        strobe=strobe,
+    )
+    print(f"Message sent to {deviceName} [{deviceId}]")
+
+
 def run_once(config: Config, *, publish: bool) -> int:
     # ``check`` und ``once`` unterscheiden sich ausschließlich darin, ob der
     # erfolgreich gelesene Snapshot zusätzlich an MQTT publiziert wird.
@@ -179,7 +216,7 @@ def run_once(config: Config, *, publish: bool) -> int:
 
 
 def execute_command(args: argparse.Namespace, config: Config) -> int | None:
-    if args.command == "set-password":
+    if args.command == "password":
         set_password(config, find_account(config, args.account))
         return 0
 
@@ -196,6 +233,19 @@ def execute_command(args: argparse.Namespace, config: Config) -> int | None:
             config,
             find_account(config, args.account),
             args.device,
+        )
+        return 0
+
+    if args.command == "message":
+        send_message(
+            config,
+            find_account(config, args.account),
+            args.device,
+            args.message,
+            subject=args.subject,
+            sound=args.sound,
+            vibrate=args.vibrate,
+            strobe=args.strobe,
         )
         return 0
 

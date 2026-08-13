@@ -13,24 +13,24 @@ Das Projekt wurde speziell für FHEM entwickelt, die MQTT-Schnittstelle ist jedo
 
 ```text
 Apple iCloud / Find My
-          │
-          │ HTTPS
-          ▼
+          |
+          | HTTPS
+          |
        pyicloud
-          │
-          │ API
-          ▼
+          |
+          | API
+          |
      findmy2mqtt
-          │
-          │ MQTT
-          ▼
+          |
+          | MQTT
+          |
       MQTT Broker
-          │
-          ├── FHEM
-          ├── Home Assistant
-          ├── openHAB
-          ├── Node-RED
-          └── andere MQTT-Consumer
+          |
+          +-- FHEM
+          +-- Home Assistant
+          +-- openHAB
+          +-- Node-RED
+          +-- andere MQTT-Consumer
 ```
 
 Bei FHEM kann `MQTT2_SERVER` direkt als MQTT-Broker verwendet werden.
@@ -48,6 +48,7 @@ Bei FHEM kann `MQTT2_SERVER` direkt als MQTT-Broker verwendet werden.
 - persistente iCloud-Sessions
 - `locate` per CLI über Gerätenamen oder `deviceId`
 - `locate` per MQTT
+- `message` per CLI und MQTT
 - systemd-Service
 
 ### Noch nicht unterstützt
@@ -70,6 +71,7 @@ Beispiele:
 ```text
 findmy/person1/ABCDEF123456/state
 findmy/person1/ABCDEF123456/locate
+findmy/person1/ABCDEF123456/message
 ```
 
 ### Status
@@ -118,6 +120,32 @@ findmy/person1/ABCDEF123456/locate
 
 Eine Payload wird nicht benötigt. Command-Nachrichten dürfen nicht retained gesendet werden; retained Commands werden ignoriert.
 
+### Message per MQTT
+
+```text
+findmy/<account>/<deviceId>/message
+```
+
+Einfache Text-Payload:
+
+```text
+Fenster ist noch offen
+```
+
+Optional als JSON-Payload:
+
+```json
+{
+  "subject": "alert",
+  "message": "Fenster ist noch offen",
+  "sound": true,
+  "vibrate": true,
+  "strobe": false
+}
+```
+
+Command-Nachrichten dürfen nicht retained gesendet werden; retained Commands werden ignoriert.
+
 ## MQTT-Client-ID
 
 Jedes Apple-Gerät erhält eine persistente MQTT-Client-ID aus Apple-Account und `deviceId`, z. B.:
@@ -132,7 +160,7 @@ Der Anzeigename ist nicht Bestandteil der MQTT-Identität.
 
 - `findmy2mqtt.py` – Start, Logging und Signalbehandlung
 - `lib/apple.py` – `pyicloud`, Apple-Login, 2FA, Sessions, Geräte und Locate
-- `lib/bridge.py` – Polling, Command-Queue und Apple↔MQTT-Orchestrierung
+- `lib/bridge.py` – Polling, Command-Queue und Apple?MQTT-Orchestrierung
 - `lib/cli.py` – Kommandozeile
 - `lib/config.py` – Konfiguration, Accounts und Credential-Pfade
 - `lib/device.py` – Normalisierung der Apple-Gerätedaten
@@ -171,7 +199,7 @@ Installiert werden unter anderem:
 
 ```text
 /opt/findmy2mqtt/
-/etc/findmy2mqtt/config.json
+/etc/findmy2mqtt/config.yaml
 /var/lib/findmy2mqtt/
 /etc/systemd/system/findmy2mqtt.service
 /usr/local/bin/findmy2mqtt
@@ -184,55 +212,52 @@ Zusätzlich werden der Systembenutzer `findmy2mqtt` und ein Python-venv unter `/
 Standardpfad:
 
 ```text
-/etc/findmy2mqtt/config.json
+/etc/findmy2mqtt/config.yaml
 ```
 
 Beispiel:
 
-```json
-{
-  "stateDir": "/var/lib/findmy2mqtt",
-  "pollInterval": 300,
-  "mqtt": {
-    "host": "127.0.0.1",
-    "port": 1883,
-    "username": null,
-    "password": null,
-    "passwordFile": null,
-    "tls": false,
-    "keepalive": 60,
-    "topicPrefix": "findmy",
-    "qos": 0
-  },
-  "accounts": [
-    {
-      "name": "person1",
-      "appleId": "person1@example.com",
-      "passwordFile": "person1.password",
-      "familyDevices": false
-    },
-    {
-      "name": "person2",
-      "appleId": "person2@example.com",
-      "passwordFile": "person2.password",
-      "familyDevices": false
-    }
-  ]
-}
+```yaml
+stateDir: /var/lib/findmy2mqtt
+pollInterval: 300
+
+mqtt:
+  host: 127.0.0.1
+  port: 1883
+  username:
+  password:
+  passwordFile:
+  tls: false
+  keepalive: 60
+  topicPrefix: findmy
+  qos: 0
+
+accounts:
+  - name: person1
+    appleId: person1@example.com
+    passwordFile: person1.password
+    familyDevices: false
+
+  - name: person2
+    appleId: person2@example.com
+    passwordFile: person2.password
+    familyDevices: false
 ```
 
 `familyDevices` legt fest, ob über die Apple-Familie freigegebene Geräte für den Account mit abgefragt werden.
 
 ## CLI
 
-Die Standardkonfiguration `/etc/findmy2mqtt/config.json` wird automatisch verwendet:
+Die Standardkonfiguration `/etc/findmy2mqtt/config.yaml` wird automatisch verwendet:
 
 ```bash
-sudo findmy2mqtt set-password person1
+sudo findmy2mqtt password person1
 sudo findmy2mqtt auth person1
 sudo findmy2mqtt devices person1
 sudo findmy2mqtt locate person1 "Person1 iPhone"
 sudo findmy2mqtt locate person1 ABCDEF123456
+sudo findmy2mqtt message person1 ABCDEF123456 alert "Fenster ist noch offen"
+sudo findmy2mqtt message person1 ABCDEF123456 alert "Alarm" --sound --vibrate --strobe
 sudo findmy2mqtt check
 sudo findmy2mqtt once
 ```
@@ -240,7 +265,7 @@ sudo findmy2mqtt once
 Eine abweichende Konfiguration kann mit `--config` angegeben werden:
 
 ```bash
-sudo findmy2mqtt --config /pfad/config.json devices person1
+sudo findmy2mqtt --config /pfad/config.yaml devices person1
 ```
 
 Passwörter werden unter `/var/lib/findmy2mqtt/credentials/`, Sessions unter `/var/lib/findmy2mqtt/sessions/<account>/` gespeichert.
@@ -265,7 +290,7 @@ journalctl -u findmy2mqtt -f
 
 ## FHEM
 
-Ein vorhandener `MQTT2_SERVER` kann direkt als Broker verwendet werden. `readingList` verarbeitet das eingehende `/state`-Topic, `setList` publiziert `/locate`.
+Ein vorhandener `MQTT2_SERVER` kann direkt als Broker verwendet werden. `readingList` verarbeitet das eingehende `/state`-Topic, `setList` publiziert `/locate` und `/message`.
 
 ### Vollständiges FHEM-Gerätebeispiel
 
@@ -279,10 +304,10 @@ attr FindMy_person1_iPhone group Find My
 attr FindMy_person1_iPhone icon it_smartphone
 attr FindMy_person1_iPhone room Anwesenheit
 attr FindMy_person1_iPhone readingList fm_person1_b5b2d80bb3:findmy/person1/ABCDEF123456/state:.* { json2nameValue($EVENT) }
-attr FindMy_person1_iPhone setList locate:noArg { my $id=ReadingsVal($NAME,"deviceId","");; return undef if $id eq "";; return "findmy/person1/$id/locate 1";; }
+attr FindMy_person1_iPhone setList locate:noArg { my $account=ReadingsVal($NAME,"account","");; my $id=ReadingsVal($NAME,"deviceId","");; return undef if $account eq "" || $id eq "";; return "findmy/$account/$id/locate 1";; }\
+message:textField { my $account=ReadingsVal($NAME,"account","");; my $id=ReadingsVal($NAME,"deviceId","");; return undef if $account eq "" || $id eq "";; my @p=split(/ /,$EVENT);; shift @p;; my $msg=join(" ",@p);; $msg=~s/\\/\\\\/g;; $msg=~s/"/\\"/g;; return qq(findmy/$account/$id/message {"subject":"alert","message":"$msg"});; }
 attr FindMy_person1_iPhone webCmd locate
 attr FindMy_person1_iPhone stateFormat { my $n=ReadingsVal($name,"name","findmy2mqtt");; my $s=ReadingsVal($name,"state","unknown");; my $b=ReadingsVal($name,"battery","-");; return "$n: $s | Akku: $b %";; }
-attr FindMy_person1_iPhone webCmd locate
 ```
 
 Mögliche Readings:
@@ -310,6 +335,14 @@ locationOld        0
 ```text
 findmy/person1/ABCDEF123456/locate
 ```
+
+`set FindMy_person1_iPhone message <text>` publiziert auf:
+
+```text
+findmy/person1/ABCDEF123456/message
+```
+
+Account und `deviceId` werden aus den Readings gelesen.
 
 ## Lizenz und Copyright
 

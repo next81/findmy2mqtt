@@ -118,7 +118,7 @@ def device_payload(
     payload: dict[str, Any] = {
         "state": state,
         "name": json_scalar(name),
-        "account": account.name,
+        "account": account.slug,
         "deviceId": deviceId,
         "deviceClass": json_scalar(deviceClass),
         "model": json_scalar(model),

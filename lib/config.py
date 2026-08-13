@@ -5,20 +5,20 @@
 
 """Konfiguration und Secret-Pfade von findmy2mqtt.
 
-Die öffentliche JSON-Konfiguration verwendet camelCase. Bibliotheksspezifische
+Die öffentliche YAML-Konfiguration verwendet camelCase. Bibliotheksspezifische
 Namen wie ``with_family`` bleiben auf die interne pyicloud-Anbindung begrenzt.
 """
 
 from __future__ import annotations
 
-import json
+import yaml
 from dataclasses import dataclass
 from pathlib import Path
 
 from .utils import slugify
 
 
-DEFAULT_CONFIG_PATH = Path("/etc/findmy2mqtt/config.json")
+DEFAULT_CONFIG_PATH = Path("/etc/findmy2mqtt/config.yaml")
 
 
 @dataclass(frozen=True)
@@ -62,11 +62,13 @@ def resolve_relative(pathText: str, root: Path) -> Path:
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    # Unbekannte Top-Level-Felder (z. B. Copyright-/Repository-Metadaten)
-    # werden toleriert. Dadurch kann config.json.example dokumentiert bleiben,
-    # ohne dass Metadaten Teil des Laufzeitmodells werden müssen.
+    # YAML erlaubt Kommentare direkt in der Konfiguration und bleibt dadurch
+    # auch bei mehreren Accounts übersichtlich und gut von Hand pflegbar.
     with path.open("r", encoding="utf-8") as fileHandle:
-        raw = json.load(fileHandle)
+        raw = yaml.safe_load(fileHandle)
+
+    if not isinstance(raw, dict):
+        raise ValueError("configuration root must be a YAML mapping")
 
     stateDir = Path(raw.get("stateDir", "/var/lib/findmy2mqtt")).expanduser()
     pollInterval = int(raw.get("pollInterval", 300))
@@ -84,7 +86,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     if not topicPrefix:
         raise ValueError("mqtt.topicPrefix must not be empty")
 
-    # Ab hier wird die lose JSON-Struktur in unveränderliche Dataclasses
+    # Ab hier wird die lose YAML-Struktur in unveränderliche Dataclasses
     # überführt. Nach dem Start arbeitet der Dienst damit ohne Seiteneffekte.
     mqtt = MqttConfig(
         host=str(mqttRaw["host"]),

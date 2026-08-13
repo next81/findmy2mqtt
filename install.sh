@@ -90,14 +90,14 @@ install -o root -g root -m 0644 \
   "${SCRIPT_DIR}/findmy2mqtt.service" \
   "${SERVICE_FILE}"
 
-if [[ ! -f "${CONF_DIR}/config.json" ]]; then
+if [[ ! -f "${CONF_DIR}/config.yaml" ]]; then
   install -o root -g "${APP_USER}" -m 0640 \
-    "${SCRIPT_DIR}/config.json.example" \
-    "${CONF_DIR}/config.json"
-  echo "Created ${CONF_DIR}/config.json from example."
+    "${SCRIPT_DIR}/config.yaml.example" \
+    "${CONF_DIR}/config.yaml"
+  echo "Created ${CONF_DIR}/config.yaml from example."
 else
   # Vorhandene Accounts, Passwörter und MQTT-Einstellungen werden bei Updates behalten.
-  echo "Keeping existing ${CONF_DIR}/config.json."
+  echo "Keeping existing ${CONF_DIR}/config.yaml."
 fi
 
 # Alle pip-Pakete bleiben im eigenen venv; das OS-Python wird nicht verändert.
@@ -145,10 +145,10 @@ cat <<EOF_SUMMARY
 findmy2mqtt installed.
 
 Default configuration:
-  ${CONF_DIR}/config.json
+  ${CONF_DIR}/config.yaml
 
 Typical commands:
-  sudo findmy2mqtt set-password person1
+  sudo findmy2mqtt password person1
   sudo findmy2mqtt auth person1
   sudo findmy2mqtt devices person1
   sudo findmy2mqtt locate person1 "Person1 iPhone"
@@ -156,7 +156,7 @@ Typical commands:
   sudo findmy2mqtt once
 
 For a non-default configuration only:
-  sudo findmy2mqtt --config /path/to/config.json devices person1
+  sudo findmy2mqtt --config /path/to/config.yaml devices person1
 
 After configuration and authentication:
   sudo systemctl enable --now findmy2mqtt

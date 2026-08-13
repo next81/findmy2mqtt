@@ -194,76 +194,11 @@ class AppleAccount:
             return self._device_items(manager)
 
     def locate(self, selector: str) -> tuple[str, str]:
-        # Die CLI akzeptiert Anzeigenamen, die öffentliche topic-sichere deviceId
-        # sowie rohe Apple-IDs aus älteren Ausgaben.
-        selector = selector.strip()
-        selectorNormalized = selector.casefold()
-        if not selectorNormalized:
-            raise RuntimeError("device selector must not be empty")
-
-        decodedSelector = decode_device_id(selector).casefold()
-
         with self._lock:
-            manager = self.api().devices
-            self._refresh_manager(manager)
-            devices = getattr(manager, "devices", manager)
-            if callable(devices):
-                devices = devices()
+            deviceId, device, deviceName = self._resolve_device(selector)
 
-            idMatches: list[tuple[str, Any]] = []
-            nameMatches: list[tuple[str, Any]] = []
-
-            if isinstance(devices, Mapping) or hasattr(devices, "items"):
-                iterable = list(devices.items())
-            else:
-                iterable = [(str(index), device) for index, device in enumerate(devices)]
-
-            for collectionKey, device in iterable:
-                rawDeviceId = self._raw_device_id(device, str(collectionKey))
-                publicDeviceId = encode_device_id(rawDeviceId)
-
-                # Neben der neuen topic-sicheren ID bleiben die rohe Apple-ID und
-                # der frühere Collection-Key als Kompatibilitäts-Aliase gültig.
-                idAliases = {
-                    publicDeviceId.casefold(),
-                    rawDeviceId.casefold(),
-                    str(collectionKey).casefold(),
-                }
-
-                if (
-                    selectorNormalized in idAliases
-                    or decodedSelector == rawDeviceId.casefold()
-                ):
-                    idMatches.append((publicDeviceId, device))
-                    continue
-
-                deviceName = self._device_name(device, publicDeviceId)
-                if deviceName.casefold() == selectorNormalized:
-                    nameMatches.append((publicDeviceId, device))
-
-            matches = idMatches or nameMatches
-
-            if not matches:
-                raise RuntimeError(
-                    f"device '{selector}' not found in Apple account "
-                    f"'{self.account.name}'"
-                )
-
-            if len(matches) > 1:
-                choices = ", ".join(
-                    f"{self._device_name(device, deviceId)} [{deviceId}]"
-                    for deviceId, device in matches
-                )
-                raise RuntimeError(
-                    f"device name '{selector}' is ambiguous; "
-                    f"use the device ID: {choices}"
-                )
-
-            deviceId, device = matches[0]
-            deviceName = self._device_name(device, deviceId)
-
-            # play_sound() verwendet intern weiterhin die rohe Apple-ID aus dem
-            # pyicloud-Geräteobjekt; die topic-sichere ID muss hier nicht zurückgeschrieben werden.
+            # pyicloud sendet beim Locate die im Geräteobjekt gespeicherte rohe
+            # Apple-ID. Die öffentliche, topic-sichere deviceId bleibt unverändert.
             playSound = getattr(device, "play_sound", None)
             if not callable(playSound):
                 raise RuntimeError(
@@ -272,6 +207,109 @@ class AppleAccount:
 
             playSound()
             return deviceId, deviceName
+
+    def display_message(
+        self,
+        selector: str,
+        message: str,
+        *,
+        subject: str = "findmy2mqtt",
+        sound: bool = False,
+        vibrate: bool = False,
+        strobe: bool = False,
+    ) -> tuple[str, str]:
+        message = str(message).strip()
+        if not message:
+            raise RuntimeError("message must not be empty")
+
+        with self._lock:
+            deviceId, device, deviceName = self._resolve_device(selector)
+
+            # pyicloud prüft selbst, ob Apple für das Gerät Messaging unterstützt.
+            displayMessage = getattr(device, "display_message", None)
+            if not callable(displayMessage):
+                raise RuntimeError(
+                    f"message is not supported for device '{deviceName}'"
+                )
+
+            displayMessage(
+                subject=subject or "findmy2mqtt",
+                message=message,
+                sounds=bool(sound),
+                vibrate=bool(vibrate),
+                strobe=bool(strobe),
+            )
+            return deviceId, deviceName
+
+    def _resolve_device(self, selector: str) -> tuple[str, Any, str]:
+        # CLI und MQTT verwenden dieselbe Auflösung. Akzeptiert werden
+        # Anzeigename, topic-sichere deviceId, rohe Apple-ID und ältere Keys.
+        selector = selector.strip()
+        selectorNormalized = selector.casefold()
+        if not selectorNormalized:
+            raise RuntimeError("device selector must not be empty")
+
+        decodedSelector = decode_device_id(selector).casefold()
+
+        manager = self.api().devices
+        self._refresh_manager(manager)
+        devices = getattr(manager, "devices", manager)
+        if callable(devices):
+            devices = devices()
+
+        idMatches: list[tuple[str, Any]] = []
+        nameMatches: list[tuple[str, Any]] = []
+
+        if isinstance(devices, Mapping) or hasattr(devices, "items"):
+            iterable = list(devices.items())
+        else:
+            iterable = [
+                (str(index), device)
+                for index, device in enumerate(devices)
+            ]
+
+        for collectionKey, device in iterable:
+            rawDeviceId = self._raw_device_id(device, str(collectionKey))
+            publicDeviceId = encode_device_id(rawDeviceId)
+
+            idAliases = {
+                publicDeviceId.casefold(),
+                rawDeviceId.casefold(),
+                str(collectionKey).casefold(),
+            }
+
+            if (
+                selectorNormalized in idAliases
+                or decodedSelector == rawDeviceId.casefold()
+            ):
+                idMatches.append((publicDeviceId, device))
+                continue
+
+            deviceName = self._device_name(device, publicDeviceId)
+            if deviceName.casefold() == selectorNormalized:
+                nameMatches.append((publicDeviceId, device))
+
+        matches = idMatches or nameMatches
+
+        if not matches:
+            raise RuntimeError(
+                f"device '{selector}' not found in Apple account "
+                f"'{self.account.name}'"
+            )
+
+        # Anzeigenamen können mehrfach vorkommen, die deviceId ist eindeutig.
+        if len(matches) > 1:
+            choices = ", ".join(
+                f"{self._device_name(device, deviceId)} [{deviceId}]"
+                for deviceId, device in matches
+            )
+            raise RuntimeError(
+                f"device name '{selector}' is ambiguous; "
+                f"use the device ID: {choices}"
+            )
+
+        deviceId, device = matches[0]
+        return deviceId, device, self._device_name(device, deviceId)
 
     @staticmethod
     def _device_name(device: Any, deviceId: str) -> str:

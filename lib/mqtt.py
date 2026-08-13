@@ -44,10 +44,14 @@ def configure_client_auth(client: mqtt.Client, config: Config) -> None:
         client.tls_set()
 
 
-def locate_command_topic(config: Config) -> str:
-    # Nur der unterstützte Befehl ``locate`` wird abonniert. Ein generisches #
-    # würde auch die eigenen /state-Publishes als vermeintliche Commands empfangen.
-    return f"{config.mqtt.topicPrefix}/+/+/locate"
+def command_topics(config: Config) -> tuple[str, str]:
+    # Nur tatsächlich unterstützte Befehle abonnieren. Ein generisches #
+    # würde auch die eigenen /state-Publishes als Commands empfangen.
+    prefix = config.mqtt.topicPrefix
+    return (
+        f"{prefix}/+/+/locate",
+        f"{prefix}/+/+/message",
+    )
 
 
 def parse_command_topic(
@@ -203,7 +207,7 @@ class CommandSubscriber:
     def __init__(
         self,
         config: Config,
-        commandHandler: Callable[[str, str, str], None],
+        commandHandler: Callable[[str, str, str, bytes], None],
     ) -> None:
         self.config = config
         self.commandHandler = commandHandler
@@ -214,7 +218,7 @@ class CommandSubscriber:
         # Der Control-Client gehört zum Dienst, nicht zu einem einzelnen Gerät.
         # Der Hostname verhindert Kollisionen bei mehreren findmy2mqtt-Instanzen.
         self.clientId = f"fm_control_{hostSlug}"
-        self.topic = locate_command_topic(config)
+        self.topics = command_topics(config)
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -241,21 +245,25 @@ class CommandSubscriber:
 
         # Bei jeder neuen Verbindung erneut abonnieren, weil der Client
         # absichtlich keine dauerhafte Broker-Session voraussetzt.
-        result, messageId = client.subscribe(
-            self.topic,
-            qos=self.config.mqtt.qos,
-        )
+        subscriptions = [
+            (topic, self.config.mqtt.qos)
+            for topic in self.topics
+        ]
+        result, messageId = client.subscribe(subscriptions)
 
         if result != mqtt.MQTT_ERR_SUCCESS:
             LOG.error(
                 "MQTT subscribe failed for %s: rc=%s",
-                self.topic,
+                ", ".join(self.topics),
                 result,
             )
             self._connected.clear()
             return
 
-        LOG.info("MQTT command listener subscribed: %s", self.topic)
+        LOG.info(
+            "MQTT command listener subscribed: %s",
+            ", ".join(self.topics),
+        )
         self._connected.set()
 
     def _on_disconnect(
@@ -287,9 +295,14 @@ class CommandSubscriber:
 
         accountSlug, deviceId, command = parsed
 
-        # Die Payload wird für die aktuelle Befehlssyntax nicht benötigt.
-        # Alle notwendigen Parameter sind eindeutig im Topic enthalten.
-        self.commandHandler(accountSlug, deviceId, command)
+        # locate benötigt keine Payload. message reicht die unveränderten Bytes
+        # an den Worker weiter, damit JSON und einfacher UTF-8-Text möglich bleiben.
+        self.commandHandler(
+            accountSlug,
+            deviceId,
+            command,
+            bytes(message.payload),
+        )
 
     def start(self) -> None:
         # Der Subscriber muss vor dem ersten Poll aktiv sein, damit locate-Kommandos

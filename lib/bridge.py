@@ -11,6 +11,7 @@ Status-Polling, Publisher-Lebenszyklus und die serielle Abarbeitung von Commands
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
@@ -21,6 +22,7 @@ from .apple import AppleAccount
 from .config import AccountConfig, Config
 from .device import device_payload
 from .mqtt import CommandSubscriber, DevicePublisher
+from .utils import slugify
 
 LOG = logging.getLogger("findmy2mqtt.bridge")
 
@@ -39,7 +41,7 @@ class Bridge:
 
         # MQTT-Callbacks dürfen den Netzwerkthread nicht mit Apple-HTTP-Aufrufen
         # blockieren. Kommandos werden deshalb in einem eigenen Worker verarbeitet.
-        self.commandQueue: queue.Queue[tuple[str, str, str] | None] = queue.Queue()
+        self.commandQueue: queue.Queue[tuple[str, str, str, bytes] | None] = queue.Queue()
         self.commandThread: threading.Thread | None = None
         self.commandSubscriber: CommandSubscriber | None = None
 
@@ -116,8 +118,9 @@ class Bridge:
         accountSlug: str,
         deviceId: str,
         command: str,
+        payload: bytes,
     ) -> None:
-        self.commandQueue.put((accountSlug, deviceId, command))
+        self.commandQueue.put((accountSlug, deviceId, command, payload))
 
     def _command_worker(self) -> None:
         while not self.stopEvent.is_set():
@@ -130,7 +133,8 @@ class Bridge:
                 self.commandQueue.task_done()
                 return
 
-            accountSlug, deviceId, command = queuedCommand
+            accountSlug, deviceId, command, payload = queuedCommand
+            accountSlug = slugify(accountSlug)
 
             try:
                 apple = self.appleAccounts.get(accountSlug)
@@ -149,9 +153,25 @@ class Bridge:
                         locatedDeviceId,
                         accountSlug,
                     )
+
+                elif command == "message":
+                    options = self._parse_message_payload(payload)
+                    messageDeviceId, deviceName = apple.display_message(
+                        deviceId,
+                        options["message"],
+                        subject=options["subject"],
+                        sound=options["sound"],
+                        vibrate=options["vibrate"],
+                        strobe=options["strobe"],
+                    )
+                    LOG.info(
+                        "MQTT message sent to %s [%s] via account %s",
+                        deviceName,
+                        messageDeviceId,
+                        accountSlug,
+                    )
+
                 else:
-                    # Unbekannte Befehle werden bewusst nur protokolliert. So kann
-                    # das Topic-Schema später um weitere Aktionen erweitert werden.
                     LOG.warning(
                         "Ignoring unsupported MQTT command '%s' for %s/%s",
                         command,
@@ -167,6 +187,47 @@ class Bridge:
                 )
             finally:
                 self.commandQueue.task_done()
+
+    @staticmethod
+    def _parse_message_payload(payload: bytes) -> dict[str, Any]:
+        try:
+            text = payload.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("message payload must be valid UTF-8") from exc
+
+        if not text:
+            raise RuntimeError("message payload must not be empty")
+
+        # Einfacher Text ist für Smart-Home-Regeln bequem. JSON wird nur dann
+        # benötigt, wenn Betreff, Ton, Vibration oder Strobe gesetzt werden sollen.
+        if not text.startswith("{"):
+            return {
+                "message": text,
+                "subject": "findmy2mqtt",
+                "sound": False,
+                "vibrate": False,
+                "strobe": False,
+            }
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("invalid JSON message payload") from exc
+
+        if not isinstance(data, dict):
+            raise RuntimeError("JSON message payload must be an object")
+
+        message = str(data.get("message", "")).strip()
+        if not message:
+            raise RuntimeError("JSON message payload requires 'message'")
+
+        return {
+            "message": message,
+            "subject": str(data.get("subject", "findmy2mqtt")).strip() or "findmy2mqtt",
+            "sound": bool(data.get("sound", False)),
+            "vibrate": bool(data.get("vibrate", False)),
+            "strobe": bool(data.get("strobe", False)),
+        }
 
     def _start_command_listener(self) -> None:
         # Ein einzelner Worker serialisiert Commands. Das vermeidet parallele
