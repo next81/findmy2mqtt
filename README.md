@@ -276,12 +276,13 @@ defmod FindMy_person1_iPhone MQTT2_DEVICE fm_person1_b5b2d80bb3
 attr FindMy_person1_iPhone IODev MQTT2_FHEM_Server
 attr FindMy_person1_iPhone alias Person1 iPhone
 attr FindMy_person1_iPhone group Find My
-attr FindMy_person1_iPhone icon smartphone
+attr FindMy_person1_iPhone icon it_smartphone
 attr FindMy_person1_iPhone room Anwesenheit
 attr FindMy_person1_iPhone readingList fm_person1_b5b2d80bb3:findmy/person1/ABCDEF123456/state:.* { json2nameValue($EVENT) }
-attr FindMy_person1_iPhone setList locate:noArg { my $id=ReadingsVal($NAME,"deviceId",""); return undef if $id eq ""; return "findmy/person1/$id/locate 1"; }
+attr FindMy_person1_iPhone setList locate:noArg { my $id=ReadingsVal($NAME,"deviceId","");; return undef if $id eq "";; return "findmy/person1/$id/locate 1";; }
 attr FindMy_person1_iPhone webCmd locate
-attr FindMy_person1_iPhone stateFormat { my $n=ReadingsVal($name,"name","findmy2mqtt"); my $s=ReadingsVal($name,"state","unknown"); my $b=ReadingsVal($name,"battery","-"); my $t=ReadingsVal($name,"locationTime","-"); return "$n: $s | Akku: $b % | Standort: $t"; }
+attr FindMy_person1_iPhone stateFormat { my $n=ReadingsVal($name,"name","findmy2mqtt");; my $s=ReadingsVal($name,"state","unknown");; my $b=ReadingsVal($name,"battery","-");; return "$n: $s | Akku: $b %";; }
+attr FindMy_person1_iPhone webCmd locate
 ```
 
 Mögliche Readings:
