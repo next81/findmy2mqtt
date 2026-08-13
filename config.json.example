@@ -1,0 +1,29 @@
+{
+  "stateDir": "/var/lib/findmy2mqtt",
+  "pollInterval": 300,
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "username": null,
+    "password": null,
+    "passwordFile": null,
+    "tls": false,
+    "keepalive": 60,
+    "topicPrefix": "findmy",
+    "qos": 0
+  },
+  "accounts": [
+    {
+      "name": "person1",
+      "appleId": "person1@example.com",
+      "passwordFile": "person1.password",
+      "familyDevices": false
+    },
+    {
+      "name": "person2",
+      "appleId": "person2@example.com",
+      "passwordFile": "person2.password",
+      "familyDevices": false
+    }
+  ]
+}

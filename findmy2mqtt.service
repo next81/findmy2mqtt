@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Andreas Planer
+# Repository: https://github.com/next81/findmy2mqtt
+# Licensed under the PolyForm Strict License 1.0.0
+# https://polyformproject.org/licenses/strict/1.0.0
+
+[Unit]
+Description=findmy2mqtt
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=findmy2mqtt
+Group=findmy2mqtt
+WorkingDirectory=/opt/findmy2mqtt
+ExecStart=/usr/local/bin/findmy2mqtt run
+Restart=on-failure
+RestartSec=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/findmy2mqtt
+
+[Install]
+WantedBy=multi-user.target
