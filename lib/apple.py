@@ -33,6 +33,7 @@ from .config import (
 )
 
 LOG = logging.getLogger("findmy2mqtt.apple")
+MAX_2FA_ATTEMPTS = 3
 
 
 def session_dir(config: Config, account: AccountConfig) -> Path:
@@ -67,88 +68,150 @@ def create_api(
     )
 
 
+def _security_key_names(api: PyiCloudService) -> list[str]:
+    return [
+        str(name)
+        for name in (getattr(api, "security_key_names", None) or [])
+    ]
+
+
+def _print_2fa_delivery(api: PyiCloudService) -> None:
+    deliveryMethod = getattr(api, "two_factor_delivery_method", "unknown")
+    if deliveryMethod and deliveryMethod != "unknown":
+        print(f"Verification code requested via: {deliveryMethod}")
+
+    deliveryNotice = getattr(api, "two_factor_delivery_notice", None)
+    if deliveryNotice:
+        print(str(deliveryNotice))
+
+
+def _request_2fa_code(
+    api: PyiCloudService,
+    account: AccountConfig,
+) -> bool:
+    """Start pyicloud's active 2FA route, refreshing stale auth state once."""
+    requestCode = getattr(api, "request_2fa_code", None)
+    if not callable(requestCode):
+        raise RuntimeError(
+            "installed pyicloud does not expose 2FA code delivery"
+        )
+
+    refreshed = False
+
+    # Ein gültiges, aber noch nicht vertrautes Session-Token kann einen alten
+    # Prozess überleben. Der für die Code-Prüfung benötigte Bridge-Kontext wird
+    # von pyicloud dagegen absichtlich nicht persistiert. Ohne Delivery-Methode
+    # würde request_2fa_code() erst nach einem langen Bridge-Timeout scheitern.
+    if getattr(api, "two_factor_delivery_method", "unknown") == "unknown":
+        refreshed = True
+        if not _refresh_2fa_state(api, account):
+            return False
+
+    if requestCode():
+        _print_2fa_delivery(api)
+        return True
+
+    if not refreshed:
+        if not _refresh_2fa_state(api, account):
+            return False
+        if requestCode():
+            _print_2fa_delivery(api)
+            return True
+
+    raise RuntimeError("Apple could not request a new verification code")
+
+
+def _refresh_2fa_state(
+    api: PyiCloudService,
+    account: AccountConfig,
+) -> bool:
+    """Create fresh in-memory HSA2 challenge state for an untrusted session."""
+    authenticate = getattr(api, "authenticate", None)
+    if not callable(authenticate):
+        raise RuntimeError("Apple could not start two-factor authentication")
+
+    LOG.info(
+        "Stored Apple session for %s cannot continue 2FA; "
+        "starting a fresh authentication challenge.",
+        account.name,
+    )
+    authenticate(force_refresh=True)
+
+    if not getattr(api, "requires_2fa", False):
+        return False
+
+    securityKeys = _security_key_names(api)
+    if securityKeys:
+        raise RuntimeError(
+            f"{account.name}: Apple requires a registered security key; "
+            "numeric verification codes are not available"
+        )
+
+    return True
+
+
 def interactive_auth(config: Config, account: AccountConfig) -> None:
     # Authentifizierung bleibt absichtlich ein interaktiver CLI-Schritt und läuft
     # nicht im Daemon. Ein Service-Neustart kann daher niemals auf Eingaben warten.
     api = create_api(config, account)
     LOG.info("Apple login succeeded for %s", account.name)
 
-    securityKeys = getattr(api, "security_key_names", None)
+    securityKeys = _security_key_names(api)
     if securityKeys:
-        LOG.warning(
-            "Account %s has security keys registered: %s",
-            account.name,
-            ", ".join(map(str, securityKeys)),
+        raise RuntimeError(
+            f"{account.name}: Apple requires a registered security key "
+            f"({', '.join(securityKeys)}); findmy2mqtt currently supports "
+            "numeric verification codes only"
         )
 
-    # Apple zeigt beim Login häufig bereits automatisch einen Code auf einem
-    # vertrauenswürdigen Gerät an. Diesen verwenden wir zuerst und fordern nicht
-    # ungefragt einen zweiten Code per SMS oder Geräte-Prompt an.
     if getattr(api, "requires_2fa", False):
         LOG.info("Two-factor authentication is required.")
 
-        code = input(
-            "Apple verification code (Enter = request new code): "
-        ).strip()
+        for attempt in range(1, MAX_2FA_ATTEMPTS + 1):
+            if not _request_2fa_code(api, account):
+                LOG.info("Apple session for %s is already trusted.", account.name)
+                break
 
-        if not code:
-            requestCode = getattr(api, "request_2fa_code", None)
-            if not callable(requestCode) or not requestCode():
-                raise RuntimeError("Apple could not request a new verification code")
-
-            deliveryMethod = getattr(api, "two_factor_delivery_method", "unknown")
-            if deliveryMethod and deliveryMethod != "unknown":
-                print(f"Verification code requested via: {deliveryMethod}")
-
-            code = input("New Apple verification code: ").strip()
+            code = input(
+                "Apple verification code from the latest request: "
+            ).strip()
             if not code:
                 raise RuntimeError("empty verification code")
 
-        validateCode = getattr(api, "validate_2fa_code", None)
-        if not callable(validateCode) or not validateCode(code):
-            raise RuntimeError("Apple rejected the verification code")
+            validateCode = getattr(api, "validate_2fa_code", None)
+            if not callable(validateCode):
+                raise RuntimeError(
+                    "installed pyicloud does not expose 2FA code validation"
+                )
+
+            # Der HSA2-Bridge-Ablauf kann intern einen HTTP-409-Status als
+            # verifyStatus weiterreichen und dennoch erfolgreich abschließen.
+            # Maßgeblich ist ausschließlich pyiclouds boolescher Rückgabewert.
+            if validateCode(code):
+                LOG.info("2FA completed for %s", account.name)
+                break
+
+            if attempt == MAX_2FA_ATTEMPTS:
+                raise RuntimeError(
+                    "Apple rejected the verification code "
+                    f"{MAX_2FA_ATTEMPTS} times"
+                )
+
+            LOG.warning(
+                "Apple rejected the verification code; requesting a new code "
+                "(%s/%s).",
+                attempt,
+                MAX_2FA_ATTEMPTS,
+            )
 
         # pyicloud 2.6.5 vertraut die Session nach erfolgreicher Code-Prüfung
         # bereits in validate_2fa_code(); ein zweiter Trust-Aufruf ist unnötig.
-        LOG.info("2FA completed for %s", account.name)
 
-    # Kompatibilitätsweg für ältere Accounts mit Apples früherem 2SA-Verfahren.
     if getattr(api, "requires_2sa", False):
-        trustedDevices = list(getattr(api, "trusted_devices", []) or [])
-
-        if not trustedDevices:
-            raise RuntimeError(
-                "legacy two-step verification is required "
-                "but no trusted device is available"
-            )
-
-        print("Trusted devices:")
-        for index, trustedDevice in enumerate(trustedDevices):
-            label = (
-                trustedDevice.get("deviceName")
-                or trustedDevice.get("phoneNumber")
-                or str(trustedDevice)
-            )
-            print(f"  [{index}] {label}")
-
-        choice = input("Device [0]: ").strip() or "0"
-        trustedDevice = trustedDevices[int(choice)]
-        sendCode = getattr(api, "send_verification_code", None)
-        validateCode = getattr(api, "validate_verification_code", None)
-
-        if not callable(sendCode) or not callable(validateCode):
-            raise RuntimeError(
-                "installed pyicloud does not expose legacy 2SA methods"
-            )
-
-        if not sendCode(trustedDevice):
-            raise RuntimeError("could not request legacy verification code")
-
-        code = input("Apple verification code: ").strip()
-        if not validateCode(trustedDevice, code):
-            raise RuntimeError("Apple rejected the legacy verification code")
-
-        LOG.info("Legacy verification completed for %s", account.name)
+        raise RuntimeError(
+            f"{account.name}: legacy Apple two-step authentication (2SA) "
+            "is not supported; use two-factor authentication (2FA/HSA2)"
+        )
 
 
 class AppleAccount:
@@ -172,13 +235,16 @@ class AppleAccount:
             if self._api is None:
                 api = create_api(self.config, self.account)
 
-                if (
-                    getattr(api, "requires_2fa", False)
-                    or getattr(api, "requires_2sa", False)
-                ):
+                if getattr(api, "requires_2fa", False):
                     raise RuntimeError(
                         f"{self.account.name}: authentication required; "
                         f"run 'findmy2mqtt auth {self.account.name}'"
+                    )
+
+                if getattr(api, "requires_2sa", False):
+                    raise RuntimeError(
+                        f"{self.account.name}: legacy Apple two-step "
+                        "authentication (2SA) is not supported"
                     )
 
                 self._api = api

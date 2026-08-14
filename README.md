@@ -55,6 +55,8 @@ Bei FHEM kann `MQTT2_SERVER` direkt als MQTT-Broker verwendet werden.
 
 - AirTags
 - Drittanbieter-Find-My-Items
+- Apple-Accounts, die für die Anmeldung einen Hardware-Sicherheitsschlüssel verlangen
+- Apples veraltete Zwei-Schritt-Authentifizierung (2SA); unterstützt wird nur 2FA/HSA2
 
 ## MQTT-Topic-Schema
 
@@ -343,5 +345,3 @@ findmy/person1/ABCDEF123456/locate
 ```text
 findmy/person1/ABCDEF123456/message
 ```
-
-`devicetopic` legt den gemeinsamen Topic-Präfix aus Account und `deviceId` fest.
