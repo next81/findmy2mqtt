@@ -301,13 +301,15 @@ defmod FindMy_person1_iPhone MQTT2_DEVICE fm_person1_b5b2d80bb3
 attr FindMy_person1_iPhone IODev MQTT2_FHEM_Server
 attr FindMy_person1_iPhone alias Person1 iPhone
 attr FindMy_person1_iPhone group Find My
+attr FindMy_person1_iPhone devStateIcon (0|1)\d?:measure_battery_0@red [2-3]\d+:measure_battery_25@orange [4-6]\d+:measure_battery_50@green [7-8]\d+:measure_battery_75@green (9\d+|100).*:measure_battery_100@green
 attr FindMy_person1_iPhone icon it_smartphone
 attr FindMy_person1_iPhone room Anwesenheit
+attr FindMy_person1_iPhone devicetopic findmy/person1/ABCDEF123456
 attr FindMy_person1_iPhone readingList fm_person1_b5b2d80bb3:findmy/person1/ABCDEF123456/state:.* { json2nameValue($EVENT) }
-attr FindMy_person1_iPhone setList locate:noArg { my $account=ReadingsVal($NAME,"account","");; my $id=ReadingsVal($NAME,"deviceId","");; return undef if $account eq "" || $id eq "";; return "findmy/$account/$id/locate 1";; }\
-message:textField { my $account=ReadingsVal($NAME,"account","");; my $id=ReadingsVal($NAME,"deviceId","");; return undef if $account eq "" || $id eq "";; my @p=split(/ /,$EVENT);; shift @p;; my $msg=join(" ",@p);; $msg=~s/\\/\\\\/g;; $msg=~s/"/\\"/g;; return qq(findmy/$account/$id/message {"subject":"alert","message":"$msg"});; }
+attr FindMy_person1_iPhone setList locate:noArg $DEVICETOPIC/locate 1\
+message:textField $DEVICETOPIC/message
 attr FindMy_person1_iPhone webCmd locate
-attr FindMy_person1_iPhone stateFormat { my $n=ReadingsVal($name,"name","findmy2mqtt");; my $s=ReadingsVal($name,"state","unknown");; my $b=ReadingsVal($name,"battery","-");; return "$n: $s | Akku: $b %";; }
+attr FindMy_person1_iPhone stateFormat { my $s=ReadingsVal($name,"state","unknown");; my $b=ReadingsNum($name,"battery","-");; return "$b\$s";; }
 ```
 
 Mögliche Readings:
@@ -322,7 +324,7 @@ model              iPhone17,1
 modelName          iPhone 16 Pro
 battery            83
 batteryStatus      NotCharging
-latitude           52.123456
+latitude           50.123456
 longitude          9.123456
 accuracy           8
 locationTime       2026-08-13 10:30:00
@@ -342,11 +344,4 @@ findmy/person1/ABCDEF123456/locate
 findmy/person1/ABCDEF123456/message
 ```
 
-Account und `deviceId` werden aus den Readings gelesen.
-
-## Lizenz und Copyright
-
-Copyright (c) 2026 Andreas Planer - https://github.com/next81/findmy2mqtt
-
-Lizenz: PolyForm Strict License 1.0.0  
-https://polyformproject.org/licenses/strict/1.0.0
+`devicetopic` legt den gemeinsamen Topic-Präfix aus Account und `deviceId` fest.
