@@ -19,7 +19,7 @@ import time
 from typing import Any
 
 from .apple import AppleAccount
-from .config import AccountConfig, Config
+from .config import AccountConfig, Config, account_password_path
 from .device import device_payload
 from .mqtt import CommandSubscriber, DevicePublisher
 from .utils import slugify
@@ -93,6 +93,20 @@ class Bridge:
         ok = True
 
         for account in self.config.accounts:
+            passwordPath = account_password_path(self.config, account)
+
+            # Ein Account darf bereits konfiguriert werden, bevor sein Passwort
+            # interaktiv hinterlegt wurde. Dieser erwartete Einrichtungszustand
+            # ist kein Refresh-Fehler und soll daher keinen Stacktrace erzeugen.
+            if not passwordPath.exists():
+                LOG.warning(
+                    "Skipping Apple account %s: password file is not "
+                    "configured yet (%s)",
+                    account.name,
+                    passwordPath,
+                )
+                continue
+
             try:
                 self.refresh_account(account, publish=publish)
             except Exception:
