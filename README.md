@@ -281,7 +281,8 @@ Passwörter werden unter `/var/lib/findmy2mqtt/credentials/`, Sessions unter `/v
 Beim 2FA-Login kann der Versuch über ein vertrauenswürdiges Apple-Gerät bis zu
 30 Sekunden dauern, bevor pyicloud auf SMS zurückfällt. Währenddessen auf die
 Eingabeaufforderung für den Bestätigungscode warten und nicht vorzeitig Enter
-drücken.
+drücken. Während der Wartezeit eingegebene Zeichen werden vor der eigentlichen
+Code-Eingabe verworfen.
 
 ## Dauerbetrieb
 

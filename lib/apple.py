@@ -12,6 +12,7 @@ Module müssen dadurch keine pyicloud-spezifischen Methoden oder Feldnamen kenne
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Mapping
@@ -133,8 +134,25 @@ def _request_2fa_code(
     raise RuntimeError("Apple could not request a new verification code")
 
 
+def _discard_buffered_terminal_input() -> None:
+    """Discard input entered while pyicloud was waiting for a new challenge."""
+    try:
+        if not sys.stdin.isatty():
+            return
+
+        # findmy2mqtt läuft auf Linux. Der lokale Import hält das Modul trotzdem
+        # auf Systemen ohne POSIX-Terminals importier- und testbar.
+        import termios
+
+        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except (AttributeError, ImportError, OSError, ValueError):
+        LOG.debug("Could not discard buffered terminal input", exc_info=True)
+
+
 def _read_2fa_code() -> str:
-    """Read a non-empty code without treating a buffered Enter as failure."""
+    """Discard premature input and then read a non-empty current code."""
+    _discard_buffered_terminal_input()
+
     while True:
         code = input(
             "Apple verification code from the latest request: "
