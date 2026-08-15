@@ -76,6 +76,12 @@ findmy/person1/ABCDEF123456/locate
 findmy/person1/ABCDEF123456/message
 ```
 
+Enthält die `deviceId` Zeichen wie `/` oder `=`, kodiert findmy2mqtt sie im
+Topic beispielsweise als `%2F` oder `%3D`. FHEM maskiert das Prozentzeichen in
+einer automatisch erzeugten `readingList` als `\x25`. Auch diese Schreibweise
+kann in `devicetopic` übernommen werden; findmy2mqtt dekodiert sie beim Empfang
+von `locate`- und `message`-Kommandos.
+
 ### Status
 
 Der Status wird retained unter folgendem Topic publiziert:
@@ -271,6 +277,11 @@ sudo findmy2mqtt --config /pfad/config.yaml devices person1
 ```
 
 Passwörter werden unter `/var/lib/findmy2mqtt/credentials/`, Sessions unter `/var/lib/findmy2mqtt/sessions/<account>/` gespeichert.
+
+Beim 2FA-Login kann der Versuch über ein vertrauenswürdiges Apple-Gerät bis zu
+30 Sekunden dauern, bevor pyicloud auf SMS zurückfällt. Währenddessen auf die
+Eingabeaufforderung für den Bestätigungscode warten und nicht vorzeitig Enter
+drücken.
 
 ## Dauerbetrieb
 

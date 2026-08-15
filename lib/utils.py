@@ -29,7 +29,11 @@ def encode_device_id(value: str) -> str:
 def decode_device_id(value: str) -> str:
     # MQTT-Kommandos enthalten die topic-sichere ID. Vor dem Vergleich mit
     # pyicloud wird exakt die ursprüngliche Apple-ID wiederhergestellt.
-    return unquote(str(value))
+    # FHEM maskiert Sonderzeichen in automatisch erzeugten readingList-RegExps
+    # als ``\xHH``. Wird ein solcher Topic in ``devicetopic`` übernommen,
+    # erreicht uns das Prozentzeichen der kodierten ID deshalb als ``\x25``.
+    value = re.sub(r"\\x25", "%", str(value), flags=re.IGNORECASE)
+    return unquote(value)
 
 
 def slugify(value: str, maxlen: int = 24) -> str:

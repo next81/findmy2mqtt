@@ -107,18 +107,46 @@ def _request_2fa_code(
         if not _refresh_2fa_state(api, account):
             return False
 
-    if requestCode():
+    def request_active_code() -> bool:
+        # Der Trusted-Device-Ablauf wartet auf Apples Push-Antwort und wechselt
+        # erst nach einem Timeout auf SMS. Der Hinweis muss vor dem blockierenden
+        # Aufruf sichtbar sein, damit eine vorschnelle Eingabe nicht im
+        # Terminalpuffer landet.
+        print(
+            "Requesting a new Apple verification code. This can take up to "
+            "30 seconds; wait for the code prompt before pressing Enter.",
+            flush=True,
+        )
+        return bool(requestCode())
+
+    if request_active_code():
         _print_2fa_delivery(api)
         return True
 
     if not refreshed:
         if not _refresh_2fa_state(api, account):
             return False
-        if requestCode():
+        if request_active_code():
             _print_2fa_delivery(api)
             return True
 
     raise RuntimeError("Apple could not request a new verification code")
+
+
+def _read_2fa_code() -> str:
+    """Read a non-empty code without treating a buffered Enter as failure."""
+    while True:
+        code = input(
+            "Apple verification code from the latest request: "
+        ).strip()
+        if code:
+            return code
+
+        print(
+            "No verification code entered. Wait for the latest code and "
+            "try again.",
+            flush=True,
+        )
 
 
 def _refresh_2fa_state(
@@ -172,11 +200,7 @@ def interactive_auth(config: Config, account: AccountConfig) -> None:
                 LOG.info("Apple session for %s is already trusted.", account.name)
                 break
 
-            code = input(
-                "Apple verification code from the latest request: "
-            ).strip()
-            if not code:
-                raise RuntimeError("empty verification code")
+            code = _read_2fa_code()
 
             validateCode = getattr(api, "validate_2fa_code", None)
             if not callable(validateCode):
