@@ -43,6 +43,7 @@ class MqttConfig:
     tls: bool = False
     keepalive: int = 60
     topicPrefix: str = "findmy"
+    discoveryPrefix: str = "homeassistant"
     qos: int = 0
 
 
@@ -86,6 +87,12 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     if not topicPrefix:
         raise ValueError("mqtt.topicPrefix must not be empty")
 
+    discoveryPrefix = str(
+        mqttRaw.get("discoveryPrefix", "homeassistant")
+    ).strip("/")
+    if not discoveryPrefix:
+        raise ValueError("mqtt.discoveryPrefix must not be empty")
+
     # Ab hier wird die lose YAML-Struktur in unveränderliche Dataclasses
     # überführt. Nach dem Start arbeitet der Dienst damit ohne Seiteneffekte.
     mqtt = MqttConfig(
@@ -97,6 +104,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         tls=bool(mqttRaw.get("tls", False)),
         keepalive=int(mqttRaw.get("keepalive", 60)),
         topicPrefix=topicPrefix,
+        discoveryPrefix=discoveryPrefix,
         qos=int(mqttRaw.get("qos", 0)),
     )
 

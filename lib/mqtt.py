@@ -25,10 +25,149 @@ except ImportError as exc:
         "paho-mqtt is not installed. Install requirements.txt in the virtualenv."
     ) from exc
 
+from . import __version__
 from .config import AccountConfig, Config, mqtt_password
 from .utils import short_hash, slugify
 
 LOG = logging.getLogger("findmy2mqtt.mqtt")
+
+
+# Home Assistant erhält für jedes mögliche Feld eine eigene Entity. Die
+# Definition ist absichtlich unabhängig vom ersten Apple-Snapshot, weil einzelne
+# Geräte manche Werte erst bei einem späteren Poll liefern.
+HOME_ASSISTANT_SENSORS: tuple[tuple[str, str, Mapping[str, Any]], ...] = (
+    ("state", "Location state", {}),
+    ("name", "Name", {"entity_category": "diagnostic"}),
+    ("account", "Account", {"entity_category": "diagnostic"}),
+    ("deviceId", "Device ID", {"entity_category": "diagnostic"}),
+    ("deviceClass", "Device class", {"entity_category": "diagnostic"}),
+    ("model", "Model", {"entity_category": "diagnostic"}),
+    ("modelName", "Model name", {"entity_category": "diagnostic"}),
+    (
+        "battery",
+        "Battery",
+        {
+            "device_class": "battery",
+            "state_class": "measurement",
+            "unit_of_measurement": "%",
+        },
+    ),
+    ("batteryStatus", "Battery status", {}),
+    ("deviceStatus", "Device status", {"entity_category": "diagnostic"}),
+    (
+        "latitude",
+        "Latitude",
+        {"unit_of_measurement": "°", "suggested_display_precision": 6},
+    ),
+    (
+        "longitude",
+        "Longitude",
+        {"unit_of_measurement": "°", "suggested_display_precision": 6},
+    ),
+    (
+        "accuracy",
+        "Accuracy",
+        {
+            "device_class": "distance",
+            "state_class": "measurement",
+            "unit_of_measurement": "m",
+        },
+    ),
+    ("locationTime", "Location time", {}),
+    ("locationTimestamp", "Location timestamp", {}),
+    ("positionType", "Position type", {"entity_category": "diagnostic"}),
+    ("locationType", "Location type", {"entity_category": "diagnostic"}),
+)
+
+
+def home_assistant_discovery(
+    config: Config,
+    account: AccountConfig,
+    deviceId: str,
+    clientId: str,
+    stateTopic: str,
+    payload: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Erzeuge ein Home-Assistant-Device-Discovery-Payload für ein Gerät."""
+    components: dict[str, dict[str, Any]] = {}
+
+    for field, name, options in HOME_ASSISTANT_SENSORS:
+        components[f"sensor_{field}"] = {
+            "p": "sensor",
+            "name": name,
+            "unique_id": f"{clientId}_{field}",
+            "state_topic": stateTopic,
+            "value_template": f"{{{{ value_json.get('{field}') }}}}",
+            **options,
+        }
+
+    components["binary_sensor_locationOld"] = {
+        "p": "binary_sensor",
+        "name": "Location old",
+        "unique_id": f"{clientId}_locationOld",
+        "state_topic": stateTopic,
+        "value_template": "{{ value_json.get('locationOld') }}",
+        "payload_on": "1",
+        "payload_off": "0",
+        "device_class": "problem",
+    }
+    components["device_tracker_location"] = {
+        "p": "device_tracker",
+        "name": None,
+        "unique_id": f"{clientId}_location",
+        "json_attributes_topic": stateTopic,
+        "json_attributes_template": (
+            "{{ {'latitude': value_json.get('latitude'), "
+            "'longitude': value_json.get('longitude'), "
+            "'gps_accuracy': value_json.get('accuracy'), "
+            "'battery_level': value_json.get('battery')} | tojson }}"
+        ),
+        "source_type": "gps",
+    }
+    components["button_locate"] = {
+        "p": "button",
+        "name": "Locate",
+        "unique_id": f"{clientId}_locate",
+        "command_topic": stateTopic.removesuffix("/state") + "/locate",
+        "payload_press": "1",
+        "retain": False,
+        "icon": "mdi:map-marker-radius",
+    }
+    components["text_message"] = {
+        "p": "text",
+        "name": "Message",
+        "unique_id": f"{clientId}_message",
+        "command_topic": stateTopic.removesuffix("/state") + "/message",
+        "min": 1,
+        "max": 255,
+        "mode": "text",
+        "retain": False,
+        "icon": "mdi:message-text",
+    }
+
+    device: dict[str, Any] = {
+        "identifiers": [f"findmy2mqtt:{account.slug}:{deviceId}"],
+        "name": str(payload.get("name") or deviceId),
+        "manufacturer": "Apple",
+    }
+    model = payload.get("modelName") or payload.get("model")
+    if model:
+        device["model"] = str(model)
+
+    discoveryTopic = (
+        f"{config.mqtt.discoveryPrefix}/device/{clientId}/config"
+    )
+    discoveryPayload = {
+        "device": device,
+        "origin": {
+            "name": "findmy2mqtt",
+            "sw_version": __version__,
+            "support_url": "https://github.com/next81/findmy2mqtt",
+        },
+        "components": components,
+        "qos": config.mqtt.qos,
+    }
+    return discoveryTopic, discoveryPayload
 
 
 def configure_client_auth(client: mqtt.Client, config: Config) -> None:
@@ -97,6 +236,9 @@ class DevicePublisher:
             f"{account.slug}/"
             f"{deviceId}/state"
         )
+        self.discoveryTopic = (
+            f"{config.mqtt.discoveryPrefix}/device/{self.clientId}/config"
+        )
 
         self._connected = threading.Event()
         # Pro Apple-Gerät wird ein eigener MQTT-Client verwendet. MQTT2_SERVER kann
@@ -110,6 +252,7 @@ class DevicePublisher:
         self._client.on_disconnect = self._on_disconnect
         configure_client_auth(self._client, config)
         self._started = False
+        self._startupMessagesPublished = False
 
     def _on_connect(
         self,
@@ -170,6 +313,35 @@ class DevicePublisher:
     def publish(self, payload: Mapping[str, Any]) -> None:
         self.ensure_connected()
 
+        if not self._startupMessagesPublished:
+            discoveryTopic, discoveryPayload = home_assistant_discovery(
+                self.config,
+                self.account,
+                self.deviceId,
+                self.clientId,
+                self.topic,
+                payload,
+            )
+            discoveryBody = json.dumps(
+                discoveryPayload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            discoveryInfo = self._client.publish(
+                discoveryTopic,
+                discoveryBody,
+                qos=self.config.mqtt.qos,
+                retain=True,
+            )
+            if discoveryInfo.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise RuntimeError(
+                    f"MQTT discovery publish failed for "
+                    f"{self.clientId}: rc={discoveryInfo.rc}"
+                )
+
+            self._startupMessagesPublished = True
+
         body = json.dumps(
             payload,
             ensure_ascii=False,
@@ -177,13 +349,13 @@ class DevicePublisher:
             sort_keys=True,
         )
 
-        # Status ist retained, damit Consumer nach einem Neustart sofort den
-        # letzten bekannten Apple-Zustand erhalten.
+        # Standort und Gerätestatus können schnell veralten und werden deshalb
+        # nicht im Broker gespeichert.
         info = self._client.publish(
             self.topic,
             body,
             qos=self.config.mqtt.qos,
-            retain=True,
+            retain=False,
         )
 
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
@@ -200,6 +372,7 @@ class DevicePublisher:
         finally:
             self._client.loop_stop()
             self._started = False
+            self._startupMessagesPublished = False
             self._connected.clear()
 
 

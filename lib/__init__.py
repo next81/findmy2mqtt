@@ -9,4 +9,4 @@ Die Paketwurzel enthält bewusst keine Laufzeitlogik; sie stellt nur gemeinsame
 Metadaten wie die Versionsnummer bereit.
 """
 
-__version__ = "0.9.5"
+__version__ = "0.9.6"

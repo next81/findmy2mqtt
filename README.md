@@ -43,7 +43,7 @@ Bei FHEM kann `MQTT2_SERVER` direkt als MQTT-Broker verwendet werden.
 - Kennzeichnung veralteter Standortdaten
 - Akkustand und Akkustatus, sofern Apple diese liefert
 - Gerätemodell und Geräteklasse
-- retained MQTT-Statusmeldungen
+- Home-Assistant-MQTT-Discovery für Status, Standort und Kommandos
 - Apple-Login mit 2FA
 - persistente iCloud-Sessions
 - `locate` per CLI über Gerätenamen oder `deviceId`
@@ -84,7 +84,7 @@ von `locate`- und `message`-Kommandos.
 
 ### Status
 
-Der Status wird retained unter folgendem Topic publiziert:
+Der Status wird nicht retained unter folgendem Topic publiziert:
 
 ```text
 findmy/<account>/<deviceId>/state
@@ -164,6 +164,26 @@ fm_person1_6cc1460c2a
 
 Der Anzeigename ist nicht Bestandteil der MQTT-Identität.
 
+## Home Assistant MQTT Discovery
+
+Beim ersten erfolgreichen Geräte-Poll nach dem Programmstart publiziert
+findmy2mqtt für jedes Apple-Gerät eine zusammengefasste MQTT-Device-Discovery-
+Konfiguration:
+
+```text
+homeassistant/device/<mqttClientId>/config
+```
+
+Die Discovery-Konfiguration enthält Entities für alle möglichen Felder des
+`/state`-Payloads, einen GPS-`device_tracker`, einen `locate`-Button und eine
+Texteingabe für `message`. Sie wird retained publiziert, enthält aber selbst
+keine Standort- oder Statuswerte. Die eigentlichen `/state`-Nachrichten bleiben
+nicht retained.
+
+Der Home-Assistant-Discovery-Prefix ist standardmäßig `homeassistant` und kann
+über `mqtt.discoveryPrefix` an die MQTT-Einstellung in Home Assistant angepasst
+werden.
+
 ## Projektstruktur
 
 - `findmy2mqtt.py` – Start, Logging und Signalbehandlung
@@ -238,6 +258,7 @@ mqtt:
   tls: false
   keepalive: 60
   topicPrefix: findmy
+  discoveryPrefix: homeassistant
   qos: 0
 
 accounts:
